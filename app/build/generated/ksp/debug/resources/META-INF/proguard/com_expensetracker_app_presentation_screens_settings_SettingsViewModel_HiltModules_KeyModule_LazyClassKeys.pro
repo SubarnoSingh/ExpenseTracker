@@ -1,0 +1,1 @@
+-keep,allowobfuscation,allowshrinking class com.expensetracker.app.presentation.screens.settings.SettingsViewModel
