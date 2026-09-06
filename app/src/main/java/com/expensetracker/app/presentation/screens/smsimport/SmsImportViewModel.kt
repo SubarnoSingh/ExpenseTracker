@@ -107,16 +107,23 @@ class SmsImportViewModel @Inject constructor(
 
     private var seeded = false
 
-    /** Starts the SMS window at the last import, so the common case is "what's new". */
+    /**
+     * Starts the window at the last import, so the common case is "what's new".
+     *
+     * With no previous import the window opens wide instead: there is nothing to
+     * duplicate yet, and a short default silently truncates history - a 90 day
+     * window on an empty database quietly drops every older message the inbox
+     * still holds, which reads as lost money rather than an unscanned range.
+     */
     fun prepare() {
         if (seeded) return
         seeded = true
         viewModelScope.launch {
             val last = settingsRepository.lastSmsImportAt.first()
-            if (last > 0) {
-                scanFrom.value = Instant.ofEpochMilli(last)
-                    .atZone(ZoneId.systemDefault())
-                    .toLocalDate()
+            scanFrom.value = if (last > 0) {
+                Instant.ofEpochMilli(last).atZone(ZoneId.systemDefault()).toLocalDate()
+            } else {
+                LocalDate.now().minusDays(FIRST_RUN_SCAN_DAYS)
             }
             scan()
         }
@@ -369,6 +376,9 @@ class SmsImportViewModel @Inject constructor(
 
     private companion object {
         const val DEFAULT_SCAN_DAYS = 90L
+
+        /** No previous import means no risk of duplicates, so reach back properly. */
+        const val FIRST_RUN_SCAN_DAYS = 730L
         const val YEARLY_GAP_DAYS = 200L
     }
 }

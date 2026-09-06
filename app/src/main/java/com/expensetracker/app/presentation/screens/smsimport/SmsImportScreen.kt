@@ -508,10 +508,9 @@ private fun MessageRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = row.duplicateOf ?: row.subtitle(),
+                    text = row.subtitle(),
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (row.duplicateOf != null) MaterialTheme.colorScheme.tertiary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
@@ -519,6 +518,27 @@ private fun MessageRow(
                 if (row.type == CategoryType.SUBSCRIPTION) {
                     CyclePill(cycle = row.billingCycle, onClick = onToggleCycle)
                 }
+            }
+            // The reason gets its own full width line: squeezed beside the date it
+            // was ellipsised away, which is the one thing the row has to explain.
+            row.duplicateOf?.let { reason ->
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = reason,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "Tap to add it anyway",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         Text(

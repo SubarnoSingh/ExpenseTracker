@@ -30,7 +30,10 @@ class SmsReader @Inject constructor(
             projection,
             "${Telephony.Sms.DATE} > ?",
             arrayOf(since.toString()),
-            "${Telephony.Sms.DATE} DESC LIMIT $SCAN_LIMIT",
+            // No row limit: the date window is the bound. A "newest N messages" cap
+            // silently overrode it - on a busy inbox 2000 messages is about three
+            // months, so asking for 2022 still only ever returned the last 90 days.
+            "${Telephony.Sms.DATE} DESC",
         ) ?: return@withContext emptyList()
 
         cursor.use {
@@ -60,11 +63,5 @@ class SmsReader @Inject constructor(
                 }
             }
         }
-    }
-
-    private companion object {
-        // Safety net only - the real bound is the caller's date window.
-        // ponytail: paginate if anyone ever scans an inbox deeper than this.
-        const val SCAN_LIMIT = 2000
     }
 }
