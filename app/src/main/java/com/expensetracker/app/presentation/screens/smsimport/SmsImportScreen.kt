@@ -1,9 +1,11 @@
 package com.expensetracker.app.presentation.screens.smsimport
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -31,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,6 +67,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.expensetracker.app.domain.model.BillingCycle
 import com.expensetracker.app.domain.model.Category
+import com.expensetracker.app.data.imports.ImportSource
 import com.expensetracker.app.domain.model.CategoryType
 import com.expensetracker.app.domain.model.Currency
 import com.expensetracker.app.presentation.components.CategoryBadge
@@ -99,6 +103,14 @@ fun SmsImportScreen(
     val currency by viewModel.currency.collectAsStateWithLifecycle()
     val scanFrom by viewModel.scanFrom.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
+    val sourceInfo by viewModel.sourceInfo.collectAsStateWithLifecycle()
+    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+
+    val statementPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.loadStatement(it, context.displayNameOf(it)) }
+    }
 
     var granted by remember {
         mutableStateOf(
@@ -154,13 +166,35 @@ fun SmsImportScreen(
             )
 
             else -> {
-                ControlBar(
+                SourceBar(
+                    source = sourceInfo.source,
                     from = scanFrom,
-                    allSelected = rows.isNotEmpty() && rows.all { it.selected },
-                    showSelectAll = rows.isNotEmpty(),
+                    statementName = sourceInfo.label,
+                    onScanSms = { viewModel.scan() },
                     onChangeRange = { showDatePicker = true },
-                    onSelectAll = viewModel::setAllSelected,
+                    onPickStatement = {
+                        statementPicker.launch(
+                            arrayOf("text/csv", "text/comma-separated-values", "text/plain", "*/*")
+                        )
+                    },
                 )
+
+                errorMessage?.let { message ->
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    )
+                }
+
+                if (rows.isNotEmpty()) {
+                    SelectionBar(
+                        allSelected = rows.all { it.selected },
+                        skipped = sourceInfo.summary(),
+                        onSelectAll = viewModel::setAllSelected,
+                    )
+                }
 
                 when {
                     state is ScanState.Scanning -> Box(
@@ -168,19 +202,27 @@ fun SmsImportScreen(
                         contentAlignment = Alignment.Center,
                     ) { CircularProgressIndicator() }
 
-                    rows.isEmpty() -> EmptyState(
+                    rows.isEmpty() && errorMessage == null -> EmptyState(
                         icon = Icons.Rounded.Sms,
                         title = "Nothing to import",
-                        subtitle = "No bank or UPI debit alerts since ${scanFrom.format(longDate)}.",
+                        subtitle = if (sourceInfo.source == ImportSource.STATEMENT) {
+                            "Every payment in that statement is already recorded."
+                        } else {
+                            "No bank or UPI debit alerts since ${scanFrom.format(longDate)}."
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp),
                         action = {
-                            TextButton(onClick = { showDatePicker = true }) {
-                                Text("Look further back")
+                            if (sourceInfo.source == ImportSource.SMS) {
+                                TextButton(onClick = { showDatePicker = true }) {
+                                    Text("Look further back")
+                                }
                             }
                         },
                     )
+
+                    rows.isEmpty() -> Spacer(Modifier.height(0.dp))
 
                     else -> ReviewList(
                         rows = rows,
@@ -209,11 +251,11 @@ fun SmsImportScreen(
 
     editingRow?.let { row ->
         CategoryPickerSheet(
-            merchant = row.sms.merchant,
+            merchant = row.candidate.merchant,
             categories = categories,
             selectedId = row.category?.id,
             onPick = {
-                viewModel.setRowCategory(row.sms.smsId, it)
+                viewModel.setRowCategory(row.candidate.id, it)
                 editingRow = null
             },
             onDismiss = { editingRow = null },
@@ -240,47 +282,97 @@ private fun TitleBar(onBack: () -> Unit) {
     }
 }
 
-/** Date range on the left, bulk selection on the right - the two things you change. */
+/** Where the rows came from, and how to change it. */
 @Composable
-private fun ControlBar(
+private fun SourceBar(
+    source: ImportSource,
     from: LocalDate,
-    allSelected: Boolean,
-    showSelectAll: Boolean,
+    statementName: String,
+    onScanSms: () -> Unit,
     onChangeRange: () -> Unit,
-    onSelectAll: (Boolean) -> Unit,
+    onPickStatement: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 20.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Pill(
+            text = if (source == ImportSource.SMS) "From ${from.format(shortDate)}" else "Messages",
+            icon = if (source == ImportSource.SMS) Icons.Rounded.CalendarMonth else Icons.Rounded.Sms,
+            selected = source == ImportSource.SMS,
+            onClick = if (source == ImportSource.SMS) onChangeRange else onScanSms,
+        )
+        Pill(
+            text = statementName.takeIf { it.isNotBlank() && source == ImportSource.STATEMENT }
+                ?.substringBeforeLast('.')
+                ?: "Statement",
+            icon = Icons.Rounded.Description,
+            selected = source == ImportSource.STATEMENT,
+            onClick = onPickStatement,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+    }
+}
+
+@Composable
+private fun Pill(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                else MaterialTheme.colorScheme.surfaceContainerHigh
+            )
+            .clickable(onClick = onClick)
+            .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (selected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            color = if (selected) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** What the source held but isn't offering, plus the bulk toggle. */
+@Composable
+private fun SelectionBar(allSelected: Boolean, skipped: String?, onSelectAll: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 20.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .clickable(onClick = onChangeRange)
-                .padding(start = 12.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.CalendarMonth,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
-            )
-            Text(
-                text = "From ${from.format(shortDate)}",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-        if (showSelectAll) {
-            TextButton(onClick = { onSelectAll(!allSelected) }) {
-                Text(if (allSelected) "Clear all" else "Select all")
-            }
+        Text(
+            text = skipped.orEmpty(),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = { onSelectAll(!allSelected) }) {
+            Text(if (allSelected) "Clear all" else "Select all")
         }
     }
 }
@@ -290,13 +382,13 @@ private fun ReviewList(
     rows: List<SmsImportRow>,
     currency: Currency,
     importing: Boolean,
-    onToggle: (Long) -> Unit,
+    onToggle: (String) -> Unit,
     onEditCategory: (SmsImportRow) -> Unit,
-    onToggleCycle: (Long) -> Unit,
+    onToggleCycle: (String) -> Unit,
     onImport: () -> Unit,
 ) {
     val selected = rows.filter { it.selected }
-    val total = selected.sumOf { it.sms.amount }
+    val total = selected.sumOf { it.candidate.amount }
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -311,16 +403,16 @@ private fun ReviewList(
                     SectionHeader(
                         label = label,
                         count = ofType.size,
-                        total = formatMoneyCompact(ofType.sumOf { it.sms.amount }, currency),
+                        total = formatMoneyCompact(ofType.sumOf { it.candidate.amount }, currency),
                     )
                 }
-                items(ofType, key = { it.sms.smsId }) { row ->
+                items(ofType, key = { it.candidate.id }) { row ->
                     MessageRow(
                         row = row,
-                        amountText = formatMoney(row.sms.amount, currency),
-                        onClick = { onToggle(row.sms.smsId) },
+                        amountText = formatMoney(row.candidate.amount, currency),
+                        onClick = { onToggle(row.candidate.id) },
                         onEditCategory = { onEditCategory(row) },
-                        onToggleCycle = { onToggleCycle(row.sms.smsId) },
+                        onToggleCycle = { onToggleCycle(row.candidate.id) },
                     )
                 }
             }
@@ -405,7 +497,7 @@ private fun MessageRow(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
-                text = row.sms.merchant,
+                text = row.candidate.merchant,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -416,9 +508,10 @@ private fun MessageRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = row.subtitle(),
+                    text = row.duplicateOf ?: row.subtitle(),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (row.duplicateOf != null) MaterialTheme.colorScheme.tertiary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
@@ -442,7 +535,7 @@ private fun SmsImportRow.subtitle(): String {
     return if (type == CategoryType.SUBSCRIPTION && charges > 1) {
         "$name  •  $charges charges since ${firstCharge.format(shortDate)}"
     } else {
-        "$name  •  ${sms.date.format(shortDate)}"
+        "$name  •  ${candidate.date.format(shortDate)}"
     }
 }
 
@@ -745,4 +838,24 @@ private fun ImportedConfirmation(
             TextButton(onClick = onDone) { Text("Done") }
         }
     }
+}
+
+/** "9 credits skipped" - says what the file held that isn't on offer. */
+private fun SourceInfo.summary(): String? {
+    val parts = buildList {
+        if (credits > 0) add("$credits incoming skipped")
+        if (unreadable > 0) add("$unreadable unreadable")
+    }
+    return parts.joinToString(", ").ifBlank { null }
+}
+
+/** The picker gives a content:// URI; ask the provider what it's called. */
+private fun Context.displayNameOf(uri: Uri): String {
+    contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (index >= 0 && cursor.moveToFirst()) {
+            cursor.getString(index)?.let { return it }
+        }
+    }
+    return uri.lastPathSegment?.substringAfterLast('/') ?: "statement.csv"
 }

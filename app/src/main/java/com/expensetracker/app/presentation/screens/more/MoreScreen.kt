@@ -85,8 +85,8 @@ fun MoreScreen(
                 MoreRow(
                     icon = Icons.Rounded.Sms,
                     iconTint = appColors.gradientEnd,
-                    title = "Import from SMS",
-                    subtitle = "Turn bank & UPI debit alerts into expenses",
+                    title = "Import transactions",
+                    subtitle = "From bank SMS or a statement file",
                     onClick = onOpenSmsImport,
                 )
                 MoreRow(

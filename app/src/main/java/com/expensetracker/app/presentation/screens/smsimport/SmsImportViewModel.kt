@@ -1,11 +1,18 @@
 package com.expensetracker.app.presentation.screens.smsimport
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.expensetracker.app.data.imports.DuplicateGuard
+import com.expensetracker.app.data.imports.ImportCandidate
+import com.expensetracker.app.data.imports.ImportSource
+import com.expensetracker.app.data.imports.SavedTransaction
+import com.expensetracker.app.data.imports.referencesInNote
 import com.expensetracker.app.data.sms.SmsCategoryGuess
-import com.expensetracker.app.data.sms.SmsExpense
 import com.expensetracker.app.data.sms.SmsReader
 import com.expensetracker.app.data.sms.merchantKey
+import com.expensetracker.app.data.statement.StatementParser
 import com.expensetracker.app.domain.model.BillingCycle
 import com.expensetracker.app.domain.model.Category
 import com.expensetracker.app.domain.model.CategoryType
@@ -18,6 +25,8 @@ import com.expensetracker.app.domain.repository.ExpenseRepository
 import com.expensetracker.app.domain.repository.SettingsRepository
 import com.expensetracker.app.domain.repository.SubscriptionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +34,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -34,15 +44,17 @@ import javax.inject.Inject
 /**
  * One line in the review list.
  *
- * A subscription row stands for every charge from that merchant in the scanned
- * range, not one message - [charges] says how many were folded together.
+ * A subscription row stands for every charge from that merchant in the range, not
+ * one message - [charges] says how many were folded together. [duplicateOf] is set
+ * when the payment looks already recorded, which leaves the row visible but off.
  */
 data class SmsImportRow(
-    val sms: SmsExpense,
+    val candidate: ImportCandidate,
     val category: Category?,
     val selected: Boolean = true,
+    val duplicateOf: String? = null,
     val charges: Int = 1,
-    val firstCharge: LocalDate = sms.date,
+    val firstCharge: LocalDate = candidate.date,
     val billingCycle: BillingCycle = BillingCycle.MONTHLY,
 ) {
     val type: CategoryType? get() = category?.type
@@ -54,8 +66,19 @@ sealed interface ScanState {
     data class Done(val expenses: Int, val subscriptions: Int) : ScanState
 }
 
+/** Which source the review list currently holds. */
+data class SourceInfo(
+    val source: ImportSource = ImportSource.SMS,
+    /** File name for a statement, empty for SMS. */
+    val label: String = "",
+    /** Rows the source held but didn't offer, e.g. money coming in. */
+    val credits: Int = 0,
+    val unreadable: Int = 0,
+)
+
 @HiltViewModel
 class SmsImportViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val smsReader: SmsReader,
     private val expenseRepository: ExpenseRepository,
     private val subscriptionRepository: SubscriptionRepository,
@@ -65,11 +88,13 @@ class SmsImportViewModel @Inject constructor(
 
     val rows = MutableStateFlow<List<SmsImportRow>>(emptyList())
     val scanState = MutableStateFlow<ScanState>(ScanState.Idle)
+    val sourceInfo = MutableStateFlow(SourceInfo())
+    val errorMessage = MutableStateFlow<String?>(null)
 
     /** True while a save is in flight, so the Import button can't be double-tapped. */
     val importing = MutableStateFlow(false)
 
-    /** How far back the next scan reaches. Seeded from the last import in [prepare]. */
+    /** How far back an SMS scan reaches. Seeded from the last import in [prepare]. */
     val scanFrom = MutableStateFlow(LocalDate.now().minusDays(DEFAULT_SCAN_DAYS))
 
     /** Every category, so a row can be moved anywhere including subscriptions. */
@@ -82,7 +107,7 @@ class SmsImportViewModel @Inject constructor(
 
     private var seeded = false
 
-    /** Starts the scan window at the last import, so the common case is "what's new". */
+    /** Starts the SMS window at the last import, so the common case is "what's new". */
     fun prepare() {
         if (seeded) return
         seeded = true
@@ -105,53 +130,103 @@ class SmsImportViewModel @Inject constructor(
     fun scan() {
         viewModelScope.launch {
             scanState.value = ScanState.Scanning
+            errorMessage.value = null
             val since = scanFrom.value
                 .atStartOfDay(ZoneId.systemDefault())
                 .toInstant()
                 .toEpochMilli()
-
-            val all = categoryRepository.observeCategories().first()
-            val fallback = all.firstOrNull { it.type == CategoryType.REGULAR }
-            val byName = all.associateBy { it.name.lowercase() }
-
-            val found = smsReader.readDebits(since).map { sms ->
-                val guess = SmsCategoryGuess.guess(sms.merchant, sms.body)
-                SmsImportRow(
-                    sms = sms,
-                    category = guess?.let { byName[it.lowercase()] } ?: fallback,
-                )
-            }
-
-            val (subscriptions, expenses) = found.partition {
-                it.type == CategoryType.SUBSCRIPTION
-            }
-            val alreadySaved = existingExpenseKeys()
-            rows.value = collapseSubscriptions(subscriptions) +
-                expenses.filterNot { it.sms.expenseKey() in alreadySaved }
-            scanState.value = ScanState.Idle
+            sourceInfo.value = SourceInfo(source = ImportSource.SMS)
+            present(smsReader.readDebits(since))
         }
     }
 
-    fun toggle(smsId: Long) {
+    /** Reads a CSV statement the user picked and offers what it holds. */
+    fun loadStatement(uri: Uri, displayName: String) {
+        viewModelScope.launch {
+            scanState.value = ScanState.Scanning
+            errorMessage.value = null
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)
+                        ?.bufferedReader()?.use { it.readText() }
+                }.getOrNull()
+            }
+            if (text.isNullOrBlank()) {
+                errorMessage.value = "Couldn't read that file."
+                rows.value = emptyList()
+                scanState.value = ScanState.Idle
+                return@launch
+            }
+
+            val result = StatementParser.parse(text, displayName)
+            sourceInfo.value = SourceInfo(
+                source = ImportSource.STATEMENT,
+                label = displayName,
+                credits = result.credits,
+                unreadable = result.skipped,
+            )
+            if (result.error != null) {
+                errorMessage.value = result.error
+                rows.value = emptyList()
+                scanState.value = ScanState.Idle
+                return@launch
+            }
+            present(result.candidates)
+        }
+    }
+
+    /** Categorises, folds subscriptions and flags anything already recorded. */
+    private suspend fun present(candidates: List<ImportCandidate>) {
+        val all = categoryRepository.observeCategories().first()
+        val fallback = all.firstOrNull { it.type == CategoryType.REGULAR }
+        val byName = all.associateBy { it.name.lowercase() }
+
+        val classified = candidates.map { candidate ->
+            val guess = SmsCategoryGuess.guess(candidate.merchant, candidate.body)
+            SmsImportRow(
+                candidate = candidate,
+                category = guess?.let { byName[it.lowercase()] } ?: fallback,
+            )
+        }
+
+        val (subscriptions, expenses) = classified.partition {
+            it.type == CategoryType.SUBSCRIPTION
+        }
+        val folded = collapseSubscriptions(subscriptions) + expenses
+
+        val flags = DuplicateGuard.flag(folded.map { it.candidate }, savedTransactions())
+        rows.value = folded
+            .map { row ->
+                val reason = flags[row.candidate.id]
+                row.copy(duplicateOf = reason, selected = reason == null)
+            }
+            .sortedByDescending { it.candidate.date }
+        scanState.value = ScanState.Idle
+    }
+
+    fun toggle(id: String) {
         rows.value = rows.value.map {
-            if (it.sms.smsId == smsId) it.copy(selected = !it.selected) else it
+            if (it.candidate.id == id) it.copy(selected = !it.selected) else it
         }
     }
 
     fun setAllSelected(selected: Boolean) {
-        rows.value = rows.value.map { it.copy(selected = selected) }
+        // "Select all" shouldn't quietly re-tick things flagged as already recorded.
+        rows.value = rows.value.map {
+            it.copy(selected = selected && (it.duplicateOf == null || it.selected))
+        }
     }
 
-    fun setRowCategory(smsId: Long, category: Category) {
+    fun setRowCategory(id: String, category: Category) {
         rows.value = rows.value.map {
-            if (it.sms.smsId == smsId) it.copy(category = category) else it
+            if (it.candidate.id == id) it.copy(category = category) else it
         }
     }
 
     /** Lets a row be moved between monthly and yearly before it is saved. */
-    fun toggleCycle(smsId: Long) {
+    fun toggleCycle(id: String) {
         rows.value = rows.value.map {
-            if (it.sms.smsId != smsId) it else it.copy(
+            if (it.candidate.id != id) it else it.copy(
                 billingCycle = if (it.billingCycle == BillingCycle.MONTHLY) {
                     BillingCycle.YEARLY
                 } else {
@@ -174,42 +249,45 @@ class SmsImportViewModel @Inject constructor(
             var subscriptions = 0
             chosen.forEach { row ->
                 val category = row.category ?: return@forEach
+                val candidate = row.candidate
                 val expenseType = category.type.toExpenseType()
                 if (expenseType == null) {
                     subscriptionRepository.addSubscription(
                         Subscription(
-                            name = row.sms.merchant,
-                            amount = row.sms.amount,
+                            name = candidate.merchant,
+                            amount = candidate.amount,
                             categoryId = category.id,
                             billingCycle = row.billingCycle,
                             startDate = row.firstCharge,
                             nextBillingDate = when (row.billingCycle) {
-                                BillingCycle.MONTHLY -> row.sms.date.plusMonths(1)
-                                BillingCycle.YEARLY -> row.sms.date.plusYears(1)
+                                BillingCycle.MONTHLY -> candidate.date.plusMonths(1)
+                                BillingCycle.YEARLY -> candidate.date.plusYears(1)
                             },
-                            note = row.sms.noteLabel(),
+                            note = candidate.noteLabel(),
                         )
                     )
                     subscriptions++
                 } else {
                     expenseRepository.addExpense(
                         Expense(
-                            amount = row.sms.amount,
-                            description = row.sms.merchant,
+                            amount = candidate.amount,
+                            description = candidate.merchant,
                             categoryId = category.id,
                             type = expenseType,
-                            date = row.sms.date,
-                            time = row.sms.time,
-                            note = row.sms.noteLabel(),
+                            date = candidate.date,
+                            time = candidate.time,
+                            note = candidate.noteLabel(),
                         )
                     )
                     expenses++
                 }
             }
-            // Watermark past every message shown this scan, imported or not - a row
-            // left unticked was a deliberate "no", so don't offer it again.
-            rows.value.maxOfOrNull { it.sms.sentAt }
-                ?.let { settingsRepository.setLastSmsImportAt(it) }
+            // Only an SMS scan moves the watermark - a statement covers its own dates
+            // and says nothing about which messages have been dealt with.
+            if (sourceInfo.value.source == ImportSource.SMS) {
+                rows.value.maxOfOrNull { it.candidate.sentAtMillis() }
+                    ?.let { settingsRepository.setLastSmsImportAt(it) }
+            }
             rows.value = emptyList()
             scanState.value = ScanState.Done(expenses, subscriptions)
             importing.value = false
@@ -218,21 +296,23 @@ class SmsImportViewModel @Inject constructor(
 
     fun clearResult() { scanState.value = ScanState.Idle }
 
+    fun clearError() { errorMessage.value = null }
+
     /**
-     * A recurring charge sends one message per cycle, so N messages from the same
-     * merchant are one subscription, not N. Folds them into a single row, infers the
-     * cycle from the spacing between charges, and drops merchants already subscribed.
+     * A recurring charge appears once per cycle, so N charges from one merchant are
+     * one subscription, not N. Folds them, infers the cycle from the gaps, and drops
+     * merchants already subscribed.
      */
     private suspend fun collapseSubscriptions(rows: List<SmsImportRow>): List<SmsImportRow> {
         val subscribed = subscriptionRepository.observeSubscriptions().first()
             .map { merchantKey(it.subscription.name) }
             .toSet()
 
-        return rows.groupBy { merchantKey(it.sms.merchant) }
+        return rows.groupBy { merchantKey(it.candidate.merchant) }
             .filterKeys { it !in subscribed }
             .map { (_, charges) ->
-                val newest = charges.maxBy { it.sms.sentAt }
-                val dates = charges.map { it.sms.date }.sorted()
+                val newest = charges.maxBy { it.candidate.date }
+                val dates = charges.map { it.candidate.date }.sorted()
                 newest.copy(
                     charges = charges.size,
                     firstCharge = dates.first(),
@@ -242,8 +322,9 @@ class SmsImportViewModel @Inject constructor(
     }
 
     /**
-     * Two charges ~a year apart is a yearly plan; anything tighter is monthly.
-     * A single charge tells us nothing, so it stays monthly - the common case.
+     * Two charges about a year apart is a yearly plan; anything tighter is monthly.
+     * A single charge tells us nothing, so it stays monthly and the row offers a
+     * pill to correct it.
      */
     private fun inferCycle(dates: List<LocalDate>): BillingCycle {
         if (dates.size < 2) return BillingCycle.MONTHLY
@@ -252,16 +333,39 @@ class SmsImportViewModel @Inject constructor(
         return if (typicalGap >= YEARLY_GAP_DAYS) BillingCycle.YEARLY else BillingCycle.MONTHLY
     }
 
-    /** One-off spends already saved, so widening the date range re-offers nothing. */
-    private suspend fun existingExpenseKeys(): Set<String> =
-        expenseRepository.observeEntries().first()
-            .map { "${it.expense.amount}|${it.expense.date}|${it.expense.description}" }
-            .toSet()
+    /** Everything already saved, so either source can be checked against the other. */
+    private suspend fun savedTransactions(): List<SavedTransaction> {
+        val expenses = expenseRepository.observeEntries().first().map {
+            SavedTransaction(
+                amount = it.expense.amount,
+                date = it.expense.date,
+                merchant = it.expense.description,
+                origin = it.expense.note.originLabel(),
+                time = it.expense.time,
+                references = referencesInNote(it.expense.note),
+            )
+        }
+        val subs = subscriptionRepository.observeSubscriptions().first().map {
+            SavedTransaction(
+                amount = it.subscription.amount,
+                date = it.subscription.startDate,
+                merchant = it.subscription.name,
+                origin = it.subscription.note.originLabel(),
+                references = referencesInNote(it.subscription.note),
+            )
+        }
+        return expenses + subs
+    }
 
-    private fun SmsExpense.expenseKey() = "$amount|$date|$merchant"
+    private fun String?.originLabel(): String = when {
+        this == null -> "an earlier entry"
+        contains("statement", ignoreCase = true) -> "a statement"
+        contains("SMS", ignoreCase = true) -> "SMS"
+        else -> "an earlier entry"
+    }
 
-    private fun SmsExpense.noteLabel() =
-        "Imported from SMS" + sender.takeIf { it.isNotBlank() }?.let { " - $it" }.orEmpty()
+    private fun ImportCandidate.sentAtMillis(): Long =
+        date.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     private companion object {
         const val DEFAULT_SCAN_DAYS = 90L

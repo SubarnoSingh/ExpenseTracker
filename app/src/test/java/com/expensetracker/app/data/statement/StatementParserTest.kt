@@ -38,7 +38,7 @@ class StatementParserTest {
     fun `the balance Dr Cr column is not mistaken for the amount's`() {
         // Every balance in this file reads "CR". Reading that column would drop
         // every debit and import every credit - the exact inversion to guard.
-        val incoming = result.candidates.filter { it.merchant.contains("SAGIRA", true) }
+        val incoming = result.candidates.filter { it.merchant.contains("PAYER ONE", true) }
         assertTrue("a credit was imported as spending", incoming.isEmpty())
     }
 

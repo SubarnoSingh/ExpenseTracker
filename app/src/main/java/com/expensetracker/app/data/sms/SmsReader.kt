@@ -2,29 +2,15 @@ package com.expensetracker.app.data.sms
 
 import android.content.Context
 import android.provider.Telephony
+import com.expensetracker.app.data.imports.ImportCandidate
+import com.expensetracker.app.data.imports.ImportSource
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Instant
-import java.time.LocalDate
-import java.time.LocalTime
 import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
-
-/** A parsed debit plus where and when it came from. */
-data class SmsExpense(
-    val smsId: Long,
-    val sentAt: Long,
-    val amount: Double,
-    val merchant: String,
-    val sender: String,
-    val body: String,
-) {
-    val date: LocalDate get() = instant.atZone(ZoneId.systemDefault()).toLocalDate()
-    val time: LocalTime get() = instant.atZone(ZoneId.systemDefault()).toLocalTime().withSecond(0).withNano(0)
-    private val instant: Instant get() = Instant.ofEpochMilli(sentAt)
-}
 
 /** Reads the SMS inbox and hands back only what [SmsParser] recognises as a spend. */
 @Singleton
@@ -32,7 +18,7 @@ class SmsReader @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
     /** Newest first. [since] is the epoch-millis start of the scan window. */
-    suspend fun readDebits(since: Long): List<SmsExpense> = withContext(Dispatchers.IO) {
+    suspend fun readDebits(since: Long): List<ImportCandidate> = withContext(Dispatchers.IO) {
         val projection = arrayOf(
             Telephony.Sms._ID,
             Telephony.Sms.ADDRESS,
@@ -56,14 +42,19 @@ class SmsReader @Inject constructor(
                 while (it.moveToNext()) {
                     val body = it.getString(bodyCol) ?: continue
                     val debit = SmsParser.parse(body) ?: continue
+                    val stamp = Instant.ofEpochMilli(it.getLong(dateCol))
+                        .atZone(ZoneId.systemDefault())
                     add(
-                        SmsExpense(
-                            smsId = it.getLong(idCol),
-                            sentAt = it.getLong(dateCol),
+                        ImportCandidate(
+                            id = "sms:${it.getLong(idCol)}",
                             amount = debit.amount,
                             merchant = debit.merchant,
-                            sender = it.getString(addressCol).orEmpty(),
+                            date = stamp.toLocalDate(),
+                            time = stamp.toLocalTime().withSecond(0).withNano(0),
+                            source = ImportSource.SMS,
+                            sourceLabel = it.getString(addressCol).orEmpty(),
                             body = body,
+                            references = referencesIn(body),
                         )
                     )
                 }
