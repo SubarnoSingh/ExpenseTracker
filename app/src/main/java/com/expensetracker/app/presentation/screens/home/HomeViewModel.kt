@@ -23,6 +23,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.time.format.TextStyle
 import java.util.Locale
 import javax.inject.Inject
@@ -135,6 +138,20 @@ class HomeViewModel @Inject constructor(
                     it.total,
                 )
             }
-        TimePeriod.ALL -> emptyList()
+        // ALL's range is 1970..9999, which would build ~96,000 empty month buckets.
+        // Chart the span the data actually covers instead.
+        TimePeriod.ALL -> {
+            val dates = entries.map { it.expense.date }
+            val first = dates.minOrNull() ?: return emptyList()
+            val last = dates.maxOrNull() ?: now
+            val pattern = if (ChronoUnit.MONTHS.between(
+                    YearMonth.from(first),
+                    YearMonth.from(last),
+                ) >= 12
+            ) "MMM yy" else "MMM"
+            val formatter = DateTimeFormatter.ofPattern(pattern, Locale.getDefault())
+            StatsCalculator.monthlyTotals(entries, first..last)
+                .map { ChartPoint(it.date.format(formatter), it.total) }
+        }
     }
 }

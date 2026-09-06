@@ -86,12 +86,7 @@ object SmsParser {
     private fun merchantIn(body: String): String {
         val raw = MERCHANT.firstNotNullOfOrNull { it.find(body)?.groupValues?.getOrNull(1) }
             ?: return "SMS expense"
-        val cleaned = raw.replace(MERCHANT_TAIL, "")
-            .replace(TRAILING_JUNK, "")
-            .replace(Regex("""\s{2,}"""), " ")
-            .trim()
-            .take(40)
-        return cleaned.ifBlank { "SMS expense" }
+        return cleanMerchant(raw).ifBlank { "SMS expense" }
     }
 }
 
@@ -100,6 +95,27 @@ private val NOISE_TOKENS = setOf(
     "pvt", "private", "ltd", "limited", "llp", "inc", "corp", "co", "com", "in",
     "india", "technologies", "technology", "tech", "solutions", "services", "service",
     "digital", "payments", "payment", "the",
+)
+
+/** Trims transaction detail and padding off a merchant name. */
+fun cleanMerchant(raw: String): String = raw
+    .replace(MERCHANT_TAIL, "")
+    .replace(Regex("""[\s.,:;\-*]+$"""), "")
+    .replace(Regex("""\s{2,}"""), " ")
+    .trim()
+    .take(40)
+
+/**
+ * The UPI/IMPS reference a payment carries. Both an SMS alert and the bank
+ * statement print the same number, so it identifies one payment exactly where
+ * amounts and dates can only suggest.
+ */
+fun referencesIn(text: String): Set<String> =
+    REFERENCE.findAll(text).mapNotNull { it.groupValues.getOrNull(1) }.toSet()
+
+private val REFERENCE = Regex(
+    """(?:upi[\s\-]*ref(?:erence)?(?:\s*no)?\.?[:\s\-]*|refno[:\s\-]*|ref\s*no[.:\s\-]*|imps[\s\-]*)(\d{9,})""",
+    RegexOption.IGNORE_CASE,
 )
 
 /**
