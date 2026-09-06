@@ -98,6 +98,7 @@ fun SmsImportScreen(
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val currency by viewModel.currency.collectAsStateWithLifecycle()
     val scanFrom by viewModel.scanFrom.collectAsStateWithLifecycle()
+    val importing by viewModel.importing.collectAsStateWithLifecycle()
 
     var granted by remember {
         mutableStateOf(
@@ -184,8 +185,10 @@ fun SmsImportScreen(
                     else -> ReviewList(
                         rows = rows,
                         currency = currency,
+                        importing = importing,
                         onToggle = viewModel::toggle,
                         onEditCategory = { editingRow = it },
+                        onToggleCycle = viewModel::toggleCycle,
                         onImport = viewModel::importSelected,
                     )
                 }
@@ -286,8 +289,10 @@ private fun ControlBar(
 private fun ReviewList(
     rows: List<SmsImportRow>,
     currency: Currency,
+    importing: Boolean,
     onToggle: (Long) -> Unit,
     onEditCategory: (SmsImportRow) -> Unit,
+    onToggleCycle: (Long) -> Unit,
     onImport: () -> Unit,
 ) {
     val selected = rows.filter { it.selected }
@@ -315,6 +320,7 @@ private fun ReviewList(
                         amountText = formatMoney(row.sms.amount, currency),
                         onClick = { onToggle(row.sms.smsId) },
                         onEditCategory = { onEditCategory(row) },
+                        onToggleCycle = { onToggleCycle(row.sms.smsId) },
                     )
                 }
             }
@@ -323,6 +329,7 @@ private fun ReviewList(
         ImportBar(
             count = selected.size,
             total = formatMoney(total, currency),
+            importing = importing,
             onImport = onImport,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
@@ -363,6 +370,7 @@ private fun MessageRow(
     amountText: String,
     onClick: () -> Unit,
     onEditCategory: () -> Unit,
+    onToggleCycle: () -> Unit,
 ) {
     val category = row.category
     val color = category?.let { Color(it.color) } ?: MaterialTheme.colorScheme.onSurfaceVariant
@@ -403,13 +411,22 @@ private fun MessageRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = row.subtitle(),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = row.subtitle(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (row.type == CategoryType.SUBSCRIPTION) {
+                    CyclePill(cycle = row.billingCycle, onClick = onToggleCycle)
+                }
+            }
         }
         Text(
             text = amountText,
@@ -423,11 +440,30 @@ private fun MessageRow(
 private fun SmsImportRow.subtitle(): String {
     val name = category?.name ?: "Uncategorised"
     return if (type == CategoryType.SUBSCRIPTION && charges > 1) {
-        val cycle = if (billingCycle == BillingCycle.YEARLY) "Yearly" else "Monthly"
-        "$name  •  $cycle, $charges charges since ${firstCharge.format(shortDate)}"
+        "$name  •  $charges charges since ${firstCharge.format(shortDate)}"
     } else {
         "$name  •  ${sms.date.format(shortDate)}"
     }
+}
+
+/**
+ * One charge in the scanned range can't tell monthly from yearly, so the guess is
+ * shown as something you can correct before importing rather than a hidden default.
+ */
+@Composable
+private fun CyclePill(cycle: BillingCycle, onClick: () -> Unit) {
+    Text(
+        text = if (cycle == BillingCycle.YEARLY) "Yearly" else "Monthly",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.primary,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier
+            .clip(RoundedCornerShape(7.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
 }
 
 /**
@@ -454,6 +490,7 @@ private fun SelectionBadge(
 private fun ImportBar(
     count: Int,
     total: String,
+    importing: Boolean,
     onImport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -468,13 +505,14 @@ private fun ImportBar(
             .padding(bottom = 12.dp),
     ) {
         GradientButton(
-            text = when (count) {
-                0 -> "Select entries to import"
-                1 -> "Import 1 entry  ·  $total"
+            text = when {
+                importing -> "Importing..."
+                count == 0 -> "Select entries to import"
+                count == 1 -> "Import 1 entry  ·  $total"
                 else -> "Import $count entries  ·  $total"
             },
             onClick = onImport,
-            enabled = count > 0,
+            enabled = count > 0 && !importing,
             modifier = Modifier.fillMaxWidth(),
         )
     }

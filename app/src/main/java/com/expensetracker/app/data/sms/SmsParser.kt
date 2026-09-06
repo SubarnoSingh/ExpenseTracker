@@ -7,6 +7,16 @@ data class ParsedDebit(
 )
 
 /**
+ * Banks append transaction detail straight onto the merchant name, which made one
+ * service parse as several ("SPOTIFY" and "Spotify debited via Kotak Card x0440"),
+ * so nothing recognised them as the same thing. Cut at the first detail word.
+ */
+private val MERCHANT_TAIL = Regex(
+    """\s+\b(debited|credited|debit|credit|via|using|thru|card|a/?c|acct|account|upi|vpa|ref|refno|txn|trxn|dated|avl|bal|info|not)\b.*""",
+    RegexOption.IGNORE_CASE,
+)
+
+/**
  * Pulls the amount and merchant out of bank / UPI / card SMS.
  *
  * Banks all write their own format, so this is deliberately keyword driven
@@ -52,6 +62,7 @@ object SmsParser {
 
     private val TRAILING_JUNK = Regex("""[\s.,:;\-*]+$""")
 
+
     fun parse(body: String): ParsedDebit? {
         if (IGNORE.containsMatchIn(body)) return null
 
@@ -75,7 +86,8 @@ object SmsParser {
     private fun merchantIn(body: String): String {
         val raw = MERCHANT.firstNotNullOfOrNull { it.find(body)?.groupValues?.getOrNull(1) }
             ?: return "SMS expense"
-        val cleaned = raw.replace(TRAILING_JUNK, "")
+        val cleaned = raw.replace(MERCHANT_TAIL, "")
+            .replace(TRAILING_JUNK, "")
             .replace(Regex("""\s{2,}"""), " ")
             .trim()
             .take(40)
@@ -95,6 +107,7 @@ private val NOISE_TOKENS = setOf(
  * so "NETFLIX COM", "Netflix India" and "NETFLIX" are recognised as the same service.
  */
 fun merchantKey(merchant: String): String = merchant
+    .replace(MERCHANT_TAIL, "")
     .lowercase()
     .replace(Regex("""[^a-z0-9 ]"""), " ")
     .split(" ")

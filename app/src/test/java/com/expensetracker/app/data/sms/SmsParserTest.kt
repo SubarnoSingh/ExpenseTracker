@@ -118,6 +118,13 @@ class MerchantKeyTest {
     }
 
     @Test
+    fun `transaction detail is cut off the merchant name`() {
+        // These two arrived as separate subscriptions before the tail was stripped.
+        assertEquals("spotify", merchantKey("Spotify debited via Kotak Card x0440"))
+        assertEquals(merchantKey("SPOTIFY"), merchantKey("Spotify debited via Kotak Card x0440"))
+    }
+
+    @Test
     fun `different services stay different`() {
         assertNotEquals(merchantKey("SPOTIFY INDIA"), merchantKey("NETFLIX COM"))
     }

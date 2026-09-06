@@ -66,6 +66,9 @@ class SmsImportViewModel @Inject constructor(
     val rows = MutableStateFlow<List<SmsImportRow>>(emptyList())
     val scanState = MutableStateFlow<ScanState>(ScanState.Idle)
 
+    /** True while a save is in flight, so the Import button can't be double-tapped. */
+    val importing = MutableStateFlow(false)
+
     /** How far back the next scan reaches. Seeded from the last import in [prepare]. */
     val scanFrom = MutableStateFlow(LocalDate.now().minusDays(DEFAULT_SCAN_DAYS))
 
@@ -145,9 +148,26 @@ class SmsImportViewModel @Inject constructor(
         }
     }
 
+    /** Lets a row be moved between monthly and yearly before it is saved. */
+    fun toggleCycle(smsId: Long) {
+        rows.value = rows.value.map {
+            if (it.sms.smsId != smsId) it else it.copy(
+                billingCycle = if (it.billingCycle == BillingCycle.MONTHLY) {
+                    BillingCycle.YEARLY
+                } else {
+                    BillingCycle.MONTHLY
+                },
+            )
+        }
+    }
+
     fun importSelected() {
+        // rows aren't cleared until the coroutine below finishes, so without this a
+        // second tap read the same list again and imported everything twice.
+        if (importing.value) return
         val chosen = rows.value.filter { it.selected && it.category != null }
         if (chosen.isEmpty()) return
+        importing.value = true
 
         viewModelScope.launch {
             var expenses = 0
@@ -192,6 +212,7 @@ class SmsImportViewModel @Inject constructor(
                 ?.let { settingsRepository.setLastSmsImportAt(it) }
             rows.value = emptyList()
             scanState.value = ScanState.Done(expenses, subscriptions)
+            importing.value = false
         }
     }
 
