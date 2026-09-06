@@ -1,1 +1,0 @@
--keep,allowobfuscation,allowshrinking class com.expensetracker.app.presentation.screens.categories.CategoriesViewModel
