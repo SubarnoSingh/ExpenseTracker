@@ -2,6 +2,7 @@ package com.expensetracker.app.data.repository
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.expensetracker.app.domain.model.AppSettings
@@ -24,6 +25,7 @@ class SettingsRepositoryImpl @Inject constructor(
         val USER_NAME = stringPreferencesKey("user_name")
         val CURRENCY = stringPreferencesKey("currency")
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val LAST_SMS_IMPORT_AT = longPreferencesKey("last_sms_import_at")
     }
 
     override val settings: Flow<AppSettings> = context.dataStore.data.map { prefs ->
@@ -32,6 +34,10 @@ class SettingsRepositoryImpl @Inject constructor(
             currency = prefs[Keys.CURRENCY] ?: "INR",
             themeMode = ThemeMode.valueOf(prefs[Keys.THEME_MODE] ?: ThemeMode.DARK.name),
         )
+    }
+
+    override val lastSmsImportAt: Flow<Long> = context.dataStore.data.map { prefs ->
+        prefs[Keys.LAST_SMS_IMPORT_AT] ?: 0L
     }
 
     override suspend fun setUserName(name: String) {
@@ -44,5 +50,9 @@ class SettingsRepositoryImpl @Inject constructor(
 
     override suspend fun setThemeMode(mode: ThemeMode) {
         context.dataStore.edit { it[Keys.THEME_MODE] = mode.name }
+    }
+
+    override suspend fun setLastSmsImportAt(millis: Long) {
+        context.dataStore.edit { it[Keys.LAST_SMS_IMPORT_AT] = millis }
     }
 }
