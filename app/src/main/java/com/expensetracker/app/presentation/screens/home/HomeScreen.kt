@@ -123,7 +123,8 @@ fun HomeScreen(
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        // Clears the floating bottom bar.
+        Spacer(Modifier.height(110.dp))
     }
 }
 

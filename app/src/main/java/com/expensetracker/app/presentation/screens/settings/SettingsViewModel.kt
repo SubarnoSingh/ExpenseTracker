@@ -77,7 +77,13 @@ class SettingsViewModel @Inject constructor(
     fun deleteAllData() {
         viewModelScope.launch {
             dataTransferManager.deleteAllData()
-                .onSuccess { _message.value = "All data deleted" }
+                .onSuccess {
+                    // The SMS watermark lives outside the database, so without this
+                    // the import screen would keep saying "nothing to import" against
+                    // a database that no longer holds any of those entries.
+                    settingsRepository.setLastSmsImportAt(0)
+                    _message.value = "All data deleted"
+                }
                 .onFailure { _message.value = "Delete failed: ${it.message}" }
         }
     }

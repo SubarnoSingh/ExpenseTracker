@@ -57,37 +57,28 @@ fun SubscriptionCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    // weight(fill = false) lets a long name ellipsize instead of
+                    // squeezing the pill down to one character per line.
                     Text(
                         text = sub.name,
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                     if (dueSoon) {
-                        Text(
+                        StatusPill(
                             text = "Due soon",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier
-                                .background(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                                    RoundedCornerShape(6.dp),
-                                )
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            background = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
                         )
                     }
                     if (showActiveState && !sub.isActive) {
-                        Text(
+                        StatusPill(
                             text = "Paused",
-                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    RoundedCornerShape(6.dp),
-                                )
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            background = MaterialTheme.colorScheme.surfaceContainerHigh,
                         )
                     }
                 }
@@ -112,4 +103,19 @@ fun SubscriptionCard(
             )
         }
     }
+}
+
+/** Small status chip. Never wraps - it keeps its own width whatever sits beside it. */
+@Composable
+private fun StatusPill(text: String, color: Color, background: Color) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelSmall,
+        color = color,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier
+            .background(background, RoundedCornerShape(7.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+    )
 }

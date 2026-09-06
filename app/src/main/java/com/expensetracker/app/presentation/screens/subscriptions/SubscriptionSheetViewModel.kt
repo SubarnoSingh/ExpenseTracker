@@ -11,6 +11,7 @@ import com.expensetracker.app.domain.model.Subscription
 import com.expensetracker.app.domain.repository.CategoryRepository
 import com.expensetracker.app.domain.repository.SettingsRepository
 import com.expensetracker.app.domain.repository.SubscriptionRepository
+import com.expensetracker.app.presentation.util.formatAmountForInput
 import com.expensetracker.app.presentation.util.formatAmountInput
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,7 +71,7 @@ class SubscriptionSheetViewModel @Inject constructor(
             subscriptionRepository.getSubscription(id)?.let { sub ->
                 editingId.value = sub.id
                 name.value = sub.name
-                amount.value = formatAmountInput(sub.amount.toString())
+                amount.value = formatAmountForInput(sub.amount)
                 selectedCategoryId.value = sub.categoryId
                 billingCycle.value = sub.billingCycle
                 startDate.value = sub.startDate

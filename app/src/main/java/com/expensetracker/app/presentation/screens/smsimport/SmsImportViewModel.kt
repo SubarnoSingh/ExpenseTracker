@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.expensetracker.app.data.sms.SmsCategoryGuess
 import com.expensetracker.app.data.sms.SmsExpense
 import com.expensetracker.app.data.sms.SmsReader
+import com.expensetracker.app.data.sms.merchantKey
 import com.expensetracker.app.domain.model.BillingCycle
 import com.expensetracker.app.domain.model.Category
 import com.expensetracker.app.domain.model.CategoryType
@@ -24,17 +25,26 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 
-/** One scanned message in the review list, with the category it was sorted into. */
+/**
+ * One line in the review list.
+ *
+ * A subscription row stands for every charge from that merchant in the scanned
+ * range, not one message - [charges] says how many were folded together.
+ */
 data class SmsImportRow(
     val sms: SmsExpense,
     val category: Category?,
     val selected: Boolean = true,
+    val charges: Int = 1,
+    val firstCharge: LocalDate = sms.date,
+    val billingCycle: BillingCycle = BillingCycle.MONTHLY,
 ) {
-    /** True when the guess landed on a real rule rather than the fallback. */
     val type: CategoryType? get() = category?.type
 }
 
@@ -76,7 +86,7 @@ class SmsImportViewModel @Inject constructor(
         viewModelScope.launch {
             val last = settingsRepository.lastSmsImportAt.first()
             if (last > 0) {
-                scanFrom.value = java.time.Instant.ofEpochMilli(last)
+                scanFrom.value = Instant.ofEpochMilli(last)
                     .atZone(ZoneId.systemDefault())
                     .toLocalDate()
             }
@@ -100,17 +110,21 @@ class SmsImportViewModel @Inject constructor(
             val all = categoryRepository.observeCategories().first()
             val fallback = all.firstOrNull { it.type == CategoryType.REGULAR }
             val byName = all.associateBy { it.name.lowercase() }
-            val alreadyThere = existingKeys()
 
-            rows.value = smsReader.readDebits(since)
-                .filter { it.key() !in alreadyThere }
-                .map { sms ->
-                    val guess = SmsCategoryGuess.guess(sms.merchant, sms.body)
-                    SmsImportRow(
-                        sms = sms,
-                        category = guess?.let { byName[it.lowercase()] } ?: fallback,
-                    )
-                }
+            val found = smsReader.readDebits(since).map { sms ->
+                val guess = SmsCategoryGuess.guess(sms.merchant, sms.body)
+                SmsImportRow(
+                    sms = sms,
+                    category = guess?.let { byName[it.lowercase()] } ?: fallback,
+                )
+            }
+
+            val (subscriptions, expenses) = found.partition {
+                it.type == CategoryType.SUBSCRIPTION
+            }
+            val alreadySaved = existingExpenseKeys()
+            rows.value = collapseSubscriptions(subscriptions) +
+                expenses.filterNot { it.sms.expenseKey() in alreadySaved }
             scanState.value = ScanState.Idle
         }
     }
@@ -147,10 +161,12 @@ class SmsImportViewModel @Inject constructor(
                             name = row.sms.merchant,
                             amount = row.sms.amount,
                             categoryId = category.id,
-                            // ponytail: monthly is the common case; edit the odd yearly one.
-                            billingCycle = BillingCycle.MONTHLY,
-                            startDate = row.sms.date,
-                            nextBillingDate = row.sms.date.plusMonths(1),
+                            billingCycle = row.billingCycle,
+                            startDate = row.firstCharge,
+                            nextBillingDate = when (row.billingCycle) {
+                                BillingCycle.MONTHLY -> row.sms.date.plusMonths(1)
+                                BillingCycle.YEARLY -> row.sms.date.plusYears(1)
+                            },
                             note = row.sms.noteLabel(),
                         )
                     )
@@ -182,23 +198,52 @@ class SmsImportViewModel @Inject constructor(
     fun clearResult() { scanState.value = ScanState.Idle }
 
     /**
-     * Keys of what's already saved, so widening the date range past a previous
-     * import re-offers nothing.
+     * A recurring charge sends one message per cycle, so N messages from the same
+     * merchant are one subscription, not N. Folds them into a single row, infers the
+     * cycle from the spacing between charges, and drops merchants already subscribed.
      */
-    private suspend fun existingKeys(): Set<String> {
-        val expenses = expenseRepository.observeEntries().first()
-            .map { "${it.expense.amount}|${it.expense.date}|${it.expense.description}" }
-        val subs = subscriptionRepository.observeSubscriptions().first()
-            .map { "${it.subscription.amount}|${it.subscription.startDate}|${it.subscription.name}" }
-        return (expenses + subs).toSet()
+    private suspend fun collapseSubscriptions(rows: List<SmsImportRow>): List<SmsImportRow> {
+        val subscribed = subscriptionRepository.observeSubscriptions().first()
+            .map { merchantKey(it.subscription.name) }
+            .toSet()
+
+        return rows.groupBy { merchantKey(it.sms.merchant) }
+            .filterKeys { it !in subscribed }
+            .map { (_, charges) ->
+                val newest = charges.maxBy { it.sms.sentAt }
+                val dates = charges.map { it.sms.date }.sorted()
+                newest.copy(
+                    charges = charges.size,
+                    firstCharge = dates.first(),
+                    billingCycle = inferCycle(dates),
+                )
+            }
     }
 
-    private fun SmsExpense.key() = "$amount|$date|$merchant"
+    /**
+     * Two charges ~a year apart is a yearly plan; anything tighter is monthly.
+     * A single charge tells us nothing, so it stays monthly - the common case.
+     */
+    private fun inferCycle(dates: List<LocalDate>): BillingCycle {
+        if (dates.size < 2) return BillingCycle.MONTHLY
+        val gaps = dates.zipWithNext { a, b -> ChronoUnit.DAYS.between(a, b) }
+        val typicalGap = gaps.sorted()[gaps.size / 2]
+        return if (typicalGap >= YEARLY_GAP_DAYS) BillingCycle.YEARLY else BillingCycle.MONTHLY
+    }
+
+    /** One-off spends already saved, so widening the date range re-offers nothing. */
+    private suspend fun existingExpenseKeys(): Set<String> =
+        expenseRepository.observeEntries().first()
+            .map { "${it.expense.amount}|${it.expense.date}|${it.expense.description}" }
+            .toSet()
+
+    private fun SmsExpense.expenseKey() = "$amount|$date|$merchant"
 
     private fun SmsExpense.noteLabel() =
         "Imported from SMS" + sender.takeIf { it.isNotBlank() }?.let { " - $it" }.orEmpty()
 
     private companion object {
         const val DEFAULT_SCAN_DAYS = 90L
+        const val YEARLY_GAP_DAYS = 200L
     }
 }

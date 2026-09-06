@@ -1,6 +1,7 @@
 package com.expensetracker.app.data.sms
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -95,5 +96,34 @@ class SmsParserTest {
         assertNull(SmsParser.parse("123456 is your OTP to pay Rs.500 at AMAZON. Do not share."))
         assertNull(SmsParser.parse("Rs.1200 will be debited from A/c X1234 on 10-09-26 for your SIP."))
         assertNull(SmsParser.parse("Your payment of Rs.300 to SWIGGY failed. Amount will be reversed."))
+    }
+}
+
+/** Guards the key that decides whether two messages are the same subscription. */
+class MerchantKeyTest {
+
+    @Test
+    fun `the same service spelled differently collapses to one key`() {
+        val keys = listOf("NETFLIX COM", "Netflix India", "NETFLIX", "netflix pvt ltd")
+            .map { merchantKey(it) }
+            .toSet()
+        assertEquals(setOf("netflix"), keys)
+    }
+
+    @Test
+    fun `corporate suffixes are dropped`() {
+        assertEquals("smartcoin financials", merchantKey("SMARTCOIN FINANCIALS PRIVATE L"))
+        assertEquals("github", merchantKey("GITHUB INC"))
+        assertEquals("uber systems", merchantKey("UBER INDIA SYSTEMS P"))
+    }
+
+    @Test
+    fun `different services stay different`() {
+        assertNotEquals(merchantKey("SPOTIFY INDIA"), merchantKey("NETFLIX COM"))
+    }
+
+    @Test
+    fun `a name made only of noise still yields something`() {
+        assertEquals("pvt ltd", merchantKey("PVT LTD"))
     }
 }

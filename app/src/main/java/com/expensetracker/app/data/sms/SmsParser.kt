@@ -82,3 +82,22 @@ object SmsParser {
         return cleaned.ifBlank { "SMS expense" }
     }
 }
+
+/** Tokens that differ between messages for the same merchant and carry no meaning. */
+private val NOISE_TOKENS = setOf(
+    "pvt", "private", "ltd", "limited", "llp", "inc", "corp", "co", "com", "in",
+    "india", "technologies", "technology", "tech", "solutions", "services", "service",
+    "digital", "payments", "payment", "the",
+)
+
+/**
+ * Collapses the many ways one merchant is spelled across messages into a single key,
+ * so "NETFLIX COM", "Netflix India" and "NETFLIX" are recognised as the same service.
+ */
+fun merchantKey(merchant: String): String = merchant
+    .lowercase()
+    .replace(Regex("""[^a-z0-9 ]"""), " ")
+    .split(" ")
+    .filter { it.isNotBlank() && it !in NOISE_TOKENS && it.length > 1 }
+    .joinToString(" ")
+    .ifBlank { merchant.lowercase().trim() }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -35,6 +36,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -151,7 +153,15 @@ fun AddExpenseSheetContent(
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val categoryRowState = rememberLazyListState()
+        LaunchedEffect(selectedCategoryId, categories) {
+            val index = categories.indexOfFirst { it.id == selectedCategoryId }
+            if (index >= 0) categoryRowState.animateScrollToItem(index)
+        }
+        LazyRow(
+            state = categoryRowState,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             items(categories, key = { it.id }) { category ->
                 CategoryChip(
                     category = category,

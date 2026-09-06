@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
@@ -142,11 +143,16 @@ fun SpendingChart(
                     contentAlignment = androidx.compose.ui.Alignment.Center,
                 ) {
                     if (index in labelIndices && point.label.isNotBlank()) {
+                        // A 30-day month gives each slot ~11dp, so the label has to be
+                        // allowed to overflow its slot or it wraps one digit per line.
                         Text(
                             text = point.label,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.wrapContentWidth(unbounded = true),
                         )
                     }
                 }
