@@ -19,6 +19,7 @@ data class SmsExpense(
     val amount: Double,
     val merchant: String,
     val sender: String,
+    val body: String,
 ) {
     val date: LocalDate get() = instant.atZone(ZoneId.systemDefault()).toLocalDate()
     val time: LocalTime get() = instant.atZone(ZoneId.systemDefault()).toLocalTime().withSecond(0).withNano(0)
@@ -30,10 +31,7 @@ data class SmsExpense(
 class SmsReader @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    /**
-     * Newest first. [since] is the epoch-millis watermark of the last import,
-     * so a repeat scan doesn't re-offer messages already dealt with.
-     */
+    /** Newest first. [since] is the epoch-millis start of the scan window. */
     suspend fun readDebits(since: Long): List<SmsExpense> = withContext(Dispatchers.IO) {
         val projection = arrayOf(
             Telephony.Sms._ID,
@@ -65,6 +63,7 @@ class SmsReader @Inject constructor(
                             amount = debit.amount,
                             merchant = debit.merchant,
                             sender = it.getString(addressCol).orEmpty(),
+                            body = body,
                         )
                     )
                 }
@@ -73,7 +72,8 @@ class SmsReader @Inject constructor(
     }
 
     private companion object {
-        // ponytail: newest 500 messages per scan, paginate if anyone hits the ceiling.
-        const val SCAN_LIMIT = 500
+        // Safety net only - the real bound is the caller's date window.
+        // ponytail: paginate if anyone ever scans an inbox deeper than this.
+        const val SCAN_LIMIT = 2000
     }
 }

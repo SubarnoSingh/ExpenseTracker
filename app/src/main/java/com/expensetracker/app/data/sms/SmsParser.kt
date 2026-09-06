@@ -28,7 +28,7 @@ object SmsParser {
 
     /** Alerts, reminders and failures that mention money but aren't a spend. */
     private val IGNORE = Regex(
-        """\b(otp|one[- ]time password|will be (debited|deducted)|is due|due on|failed|declined|unsuccessful|requests? money|has requested|e-?mandate|balance is|available balance)\b""",
+        """\b(otp|one[- ]time password|will be (debited|deducted)|is due|due on|failed|declined|unsuccessful|requests? money|has requested|balance is|available balance)\b""",
         RegexOption.IGNORE_CASE,
     )
 
