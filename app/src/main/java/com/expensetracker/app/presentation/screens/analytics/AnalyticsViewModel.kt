@@ -10,6 +10,7 @@ import com.expensetracker.app.domain.model.ExpenseEntry
 import com.expensetracker.app.domain.model.ExpenseType
 import com.expensetracker.app.domain.model.SubscriptionEntry
 import com.expensetracker.app.domain.model.TimePeriod
+import com.expensetracker.app.domain.model.elapsedRange
 import com.expensetracker.app.domain.repository.CategoryRepository
 import com.expensetracker.app.domain.repository.ExpenseRepository
 import com.expensetracker.app.domain.repository.SettingsRepository
@@ -89,6 +90,13 @@ class AnalyticsViewModel @Inject constructor(
             AnalyticsPeriod.MONTH -> TimePeriod.MONTH.range(now)
             AnalyticsPeriod.YEAR -> TimePeriod.YEAR.range(now)
         }
+        // Days that haven't happened yet aren't zero-spend days: charting them draws a
+        // flat run to the end of the month, and averaging over them divides a week of
+        // spending by thirty.
+        val elapsedRange = when (period) {
+            AnalyticsPeriod.MONTH -> TimePeriod.MONTH.elapsedRange(now)
+            AnalyticsPeriod.YEAR -> TimePeriod.YEAR.elapsedRange(now)
+        }
 
         if (segment == HomeSegment.SUBSCRIPTIONS) {
             AnalyticsUiState(
@@ -106,9 +114,9 @@ class AnalyticsViewModel @Inject constructor(
             val total = StatsCalculator.total(periodEntries)
             val breakdown = StatsCalculator.categoryBreakdown(periodEntries)
             val barSeries = when (period) {
-                AnalyticsPeriod.MONTH -> StatsCalculator.dailyTotals(periodEntries, periodRange)
+                AnalyticsPeriod.MONTH -> StatsCalculator.dailyTotals(periodEntries, elapsedRange)
                     .map { ChartPoint(it.date.dayOfMonth.toString(), it.total) }
-                AnalyticsPeriod.YEAR -> StatsCalculator.monthlyTotals(periodEntries, periodRange)
+                AnalyticsPeriod.YEAR -> StatsCalculator.monthlyTotals(periodEntries, elapsedRange)
                     .map {
                         ChartPoint(
                             it.date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
@@ -116,7 +124,7 @@ class AnalyticsViewModel @Inject constructor(
                         )
                     }
             }
-            val dayCount = periodRange.start.datesUntil(periodRange.endInclusive.plusDays(1)).count().toInt()
+            val dayCount = elapsedRange.start.datesUntil(elapsedRange.endInclusive.plusDays(1)).count().toInt()
             val maxValue = barSeries.maxOfOrNull { it.value } ?: 0.0
             val highlightIndices = if (period == AnalyticsPeriod.MONTH && maxValue > 0) {
                 barSeries.mapIndexedNotNull { index, point ->

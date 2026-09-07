@@ -10,6 +10,7 @@ import com.expensetracker.app.domain.model.ExpenseEntry
 import com.expensetracker.app.domain.model.ExpenseType
 import com.expensetracker.app.domain.model.SubscriptionEntry
 import com.expensetracker.app.domain.model.TimePeriod
+import com.expensetracker.app.domain.model.elapsedRange
 import com.expensetracker.app.domain.model.weekdayName
 import com.expensetracker.app.domain.repository.CategoryRepository
 import com.expensetracker.app.domain.repository.ExpenseRepository
@@ -127,11 +128,11 @@ class HomeViewModel @Inject constructor(
         now: LocalDate,
     ): List<ChartPoint> = when (period) {
         TimePeriod.TODAY -> StatsCalculator.hourlyTotals(entries, now)
-        TimePeriod.WEEK -> StatsCalculator.dailyTotals(entries, period.range(now))
+        TimePeriod.WEEK -> StatsCalculator.dailyTotals(entries, period.elapsedRange(now))
             .map { ChartPoint(it.date.weekdayName(), it.total) }
-        TimePeriod.MONTH -> StatsCalculator.dailyTotals(entries, period.range(now))
+        TimePeriod.MONTH -> StatsCalculator.dailyTotals(entries, period.elapsedRange(now))
             .map { ChartPoint(it.date.dayOfMonth.toString(), it.total) }
-        TimePeriod.YEAR -> StatsCalculator.monthlyTotals(entries, period.range(now))
+        TimePeriod.YEAR -> StatsCalculator.monthlyTotals(entries, period.elapsedRange(now))
             .map {
                 ChartPoint(
                     it.date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
