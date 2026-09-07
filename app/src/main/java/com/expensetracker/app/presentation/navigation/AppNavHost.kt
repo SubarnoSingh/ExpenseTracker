@@ -40,6 +40,7 @@ import com.expensetracker.app.presentation.screens.expenses.ExpensesScreen
 import com.expensetracker.app.presentation.screens.home.HomeScreen
 import com.expensetracker.app.presentation.screens.more.MoreScreen
 import com.expensetracker.app.presentation.screens.settings.SettingsScreen
+import com.expensetracker.app.presentation.screens.smsimport.SmsImportScreen
 import com.expensetracker.app.presentation.screens.subscriptions.SubscriptionSheetContent
 import com.expensetracker.app.presentation.screens.subscriptions.SubscriptionSheetViewModel
 import com.expensetracker.app.presentation.screens.subscriptions.SubscriptionsScreen
@@ -123,6 +124,7 @@ fun AppNavHost() {
                     onOpenSubscriptions = { navController.navigate("subscriptions") },
                     onOpenCategories = { navController.navigate("categories") },
                     onOpenSettings = { navController.navigate("settings") },
+                    onOpenSmsImport = { navController.navigate("sms_import") },
                 )
             }
 
@@ -157,6 +159,10 @@ fun AppNavHost() {
 
             composable("categories") {
                 CategoriesScreen()
+            }
+
+            composable("sms_import") {
+                SmsImportScreen(onBack = { navController.popBackStack() })
             }
 
             composable("settings") {

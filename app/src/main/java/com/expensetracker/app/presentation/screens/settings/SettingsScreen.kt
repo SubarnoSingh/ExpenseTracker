@@ -310,7 +310,11 @@ fun SettingsScreen(
             containerColor = MaterialTheme.colorScheme.surface,
             title = { Text("Delete all data?") },
             text = {
-                Text("This permanently removes every expense, subscription and custom category from this device. This can't be undone.")
+                Text(
+                    "This permanently removes every expense, subscription and custom " +
+                        "category from this device, and lets SMS import offer past messages " +
+                        "again. This can't be undone."
+                )
             },
             confirmButton = {
                 TextButton(onClick = {

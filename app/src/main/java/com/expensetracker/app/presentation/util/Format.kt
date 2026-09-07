@@ -29,6 +29,10 @@ fun formatPercent(fraction: Float): String = "${(fraction * 100).toInt()}%"
 
 fun formatTime(time: LocalTime): String = time.format(timeFormat)
 
+/** Seeds the amount field when editing: 39.0 shows as "39", 39.5 as "39.5". */
+fun formatAmountForInput(amount: Double): String =
+    if (amount % 1.0 == 0.0) amount.toLong().toString() else amount.toString()
+
 fun formatAmountInput(raw: String): String {
     val cleaned = raw.filter { it.isDigit() || it == '.' }
     val parts = cleaned.split('.')

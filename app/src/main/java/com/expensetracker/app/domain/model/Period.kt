@@ -35,6 +35,17 @@ enum class TimePeriod(val label: String) {
     }
 }
 
+/**
+ * The part of a period that has actually happened.
+ *
+ * Charts plot every day in their range, so the full range makes the rest of the
+ * month or year read as a flat run of zeroes rather than as "not yet".
+ */
+fun TimePeriod.elapsedRange(now: LocalDate): ClosedRange<LocalDate> {
+    val full = range(now)
+    return if (full.endInclusive > now) full.start..now else full
+}
+
 /** A single day's aggregate. */
 data class DayTotal(
     val date: LocalDate,

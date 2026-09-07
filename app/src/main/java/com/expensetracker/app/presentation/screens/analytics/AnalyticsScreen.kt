@@ -89,20 +89,26 @@ fun AnalyticsScreen(
             transitionSpec = { fadeIn() togetherWith fadeOut() },
             label = "analyticsSegment",
         ) { segment ->
-            when (segment) {
-                HomeSegment.SUBSCRIPTIONS -> SubscriptionAnalytics(
-                    state = state,
-                    onEdit = onEditSubscription,
-                )
-                else -> SpendingAnalytics(
-                    state = state,
-                    onSelectPeriod = viewModel::selectPeriod,
-                    onEditExpense = onEditExpense,
-                )
+            // AnimatedContent stacks its children like a Box, so without a Column the
+            // hero, period toggle, stat cards, chart and list all drew on top of each
+            // other and only the last one painted was visible.
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                when (segment) {
+                    HomeSegment.SUBSCRIPTIONS -> SubscriptionAnalytics(
+                        state = state,
+                        onEdit = onEditSubscription,
+                    )
+                    else -> SpendingAnalytics(
+                        state = state,
+                        onSelectPeriod = viewModel::selectPeriod,
+                        onEditExpense = onEditExpense,
+                    )
+                }
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        // Clears the floating bottom bar.
+        Spacer(Modifier.height(110.dp))
     }
 }
 

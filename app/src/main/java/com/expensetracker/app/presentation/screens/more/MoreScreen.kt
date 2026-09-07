@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -44,6 +45,7 @@ fun MoreScreen(
     onOpenSubscriptions: () -> Unit,
     onOpenCategories: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSmsImport: () -> Unit,
 ) {
     val appColors = LocalAppColors.current
     var showAbout by remember { mutableStateOf(false) }
@@ -79,6 +81,13 @@ fun MoreScreen(
                     title = "Categories",
                     subtitle = "Customize icons, colors and names",
                     onClick = onOpenCategories,
+                )
+                MoreRow(
+                    icon = Icons.Rounded.Sms,
+                    iconTint = appColors.gradientEnd,
+                    title = "Import transactions",
+                    subtitle = "From bank SMS or a statement file",
+                    onClick = onOpenSmsImport,
                 )
                 MoreRow(
                     icon = Icons.Rounded.Settings,

@@ -29,3 +29,10 @@ fun ExpenseType.toCategoryType(): CategoryType = when (this) {
     ExpenseType.REGULAR -> CategoryType.REGULAR
     ExpenseType.OCCASIONAL -> CategoryType.OCCASIONAL
 }
+
+/** Null for [CategoryType.SUBSCRIPTION] - subscriptions aren't expenses. */
+fun CategoryType.toExpenseType(): ExpenseType? = when (this) {
+    CategoryType.REGULAR -> ExpenseType.REGULAR
+    CategoryType.OCCASIONAL -> ExpenseType.OCCASIONAL
+    CategoryType.SUBSCRIPTION -> null
+}

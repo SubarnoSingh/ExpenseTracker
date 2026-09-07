@@ -11,6 +11,7 @@ import com.expensetracker.app.domain.model.toCategoryType
 import com.expensetracker.app.domain.repository.CategoryRepository
 import com.expensetracker.app.domain.repository.ExpenseRepository
 import com.expensetracker.app.domain.repository.SettingsRepository
+import com.expensetracker.app.presentation.util.formatAmountForInput
 import com.expensetracker.app.presentation.util.formatAmountInput
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,7 +92,7 @@ class AddExpenseViewModel @Inject constructor(
             expenseRepository.getExpense(id)?.let { expense ->
                 editingId.value = expense.id
                 type.value = expense.type
-                amount.value = formatAmountInput(expense.amount.toString())
+                amount.value = formatAmountForInput(expense.amount)
                 description.value = expense.description
                 note.value = expense.note.orEmpty()
                 date.value = expense.date

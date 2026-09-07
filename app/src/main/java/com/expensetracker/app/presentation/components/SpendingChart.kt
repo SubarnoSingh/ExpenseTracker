@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
@@ -61,7 +62,11 @@ fun SpendingChart(
 
             val chartWidth = size.width
             val chartHeight = size.height
-            val stepX = chartWidth / (n - 1).coerceAtLeast(1)
+            // Inset by the dot radius, or the first and last points get sliced in
+            // half by the edges of the card.
+            val inset = 5.dp.toPx()
+            val stepX = (chartWidth - inset * 2) / (n - 1).coerceAtLeast(1)
+            fun xFor(index: Int): Float = inset + index * stepX
             val baseline = chartHeight - 4.dp.toPx()
 
             fun yFor(value: Double): Float =
@@ -69,19 +74,19 @@ fun SpendingChart(
 
             val linePath = Path()
             points.forEachIndexed { index, point ->
-                val x = index * stepX
+                val x = xFor(index)
                 val y = yFor(point.value)
                 if (index == 0) linePath.moveTo(x, y)
                 else {
                     val prev = points[index - 1]
-                    val prevX = (index - 1) * stepX
+                    val prevX = xFor(index - 1)
                     val prevY = yFor(prev.value)
                     val midX = (prevX + x) / 2
                     val midY = (prevY + y) / 2
                     linePath.quadraticBezierTo(prevX, prevY, midX, midY)
                 }
             }
-            val lastX = (n - 1) * stepX
+            val lastX = xFor(n - 1)
             val lastY = yFor(points.last().value)
 
             val fillPath = Path().apply {
@@ -116,7 +121,7 @@ fun SpendingChart(
                     for (i in 0 until visible) {
                         val point = points[i]
                         if (point.value <= 0.0) continue
-                        val x = i * stepX
+                        val x = xFor(i)
                         val y = yFor(point.value)
                         drawCircle(
                             color = appColors.gradientEnd,
@@ -142,11 +147,16 @@ fun SpendingChart(
                     contentAlignment = androidx.compose.ui.Alignment.Center,
                 ) {
                     if (index in labelIndices && point.label.isNotBlank()) {
+                        // A 30-day month gives each slot ~11dp, so the label has to be
+                        // allowed to overflow its slot or it wraps one digit per line.
                         Text(
                             text = point.label,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.wrapContentWidth(unbounded = true),
                         )
                     }
                 }

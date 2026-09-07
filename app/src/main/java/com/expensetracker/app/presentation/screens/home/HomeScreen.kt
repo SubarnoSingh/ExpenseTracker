@@ -123,7 +123,8 @@ fun HomeScreen(
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        // Clears the floating bottom bar.
+        Spacer(Modifier.height(110.dp))
     }
 }
 
@@ -180,17 +181,23 @@ private fun RegularView(
 ) {
     // Period selector
     SegmentedControl(
-        options = listOf(TimePeriod.TODAY, TimePeriod.WEEK, TimePeriod.MONTH, TimePeriod.YEAR),
+        options = listOf(
+            TimePeriod.TODAY,
+            TimePeriod.WEEK,
+            TimePeriod.MONTH,
+            TimePeriod.YEAR,
+            TimePeriod.ALL,
+        ),
         selected = state.period,
         onSelect = onSelectPeriod,
-        label = { it.label.removePrefix("This ").ifEmpty { "Today" } },
+        label = { it.shortLabel() },
     )
 
     // Main spending card
     GradientCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(20.dp)) {
             Text(
-                text = "Spent ${state.period.label.lowercase()}",
+                text = state.period.spentLabel(),
                 style = MaterialTheme.typography.labelLarge,
                 color = Color.White.copy(alpha = 0.7f),
             )
@@ -273,10 +280,16 @@ private fun OccasionalView(
     onAddOccasional: () -> Unit,
 ) {
     SegmentedControl(
-        options = listOf(TimePeriod.TODAY, TimePeriod.WEEK, TimePeriod.MONTH, TimePeriod.YEAR),
+        options = listOf(
+            TimePeriod.TODAY,
+            TimePeriod.WEEK,
+            TimePeriod.MONTH,
+            TimePeriod.YEAR,
+            TimePeriod.ALL,
+        ),
         selected = state.period,
         onSelect = onSelectPeriod,
-        label = { it.label.removePrefix("This ").ifEmpty { "Today" } },
+        label = { it.shortLabel() },
     )
 
     GradientCard(modifier = Modifier.fillMaxWidth()) {
@@ -376,4 +389,16 @@ private fun SubscriptionsHomeView(
         }
         GradientButton(text = "Add Subscription", onClick = onAddSubscription)
     }
+}
+
+/** Fits the period picker: "Today", "Week", "Month", "Year", "All". */
+private fun TimePeriod.shortLabel(): String = when (this) {
+    TimePeriod.ALL -> "All"
+    else -> label.removePrefix("This ")
+}
+
+private fun TimePeriod.spentLabel(): String = when (this) {
+    TimePeriod.ALL -> "Spent in total"
+    TimePeriod.TODAY -> "Spent today"
+    else -> "Spent ${label.lowercase()}"
 }
